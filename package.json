@@ -1,0 +1,19 @@
+{
+  "name": "ncu-campus-agent-vision-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 1 PoC: screenshot -> AI/OCR -> keyword -> HTML coordinate pipeline for the NCU campus AI agent browser extension",
+  "scripts": {
+    "demo": "node test/run.mjs",
+    "test:fallback": "node test/unit-fallback.mjs",
+    "test:azure": "node --env-file-if-exists=.env test/azure-connection-test.mjs"
+  },
+  "dependencies": {
+    "jimp": "^1.6.1",
+    "tesseract.js": "^5.1.1"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.9.0"
+  }
+}
