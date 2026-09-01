@@ -21,10 +21,17 @@ function getArg(name, def) {
 }
 
 const keyword = getArg('keyword', '登入 Portal');
-const fixturePath = path.join(__dirname, 'fixtures', 'portal-mockup.png');
+const customImage = getArg('image', null);
+const fixturePath = customImage
+  ? path.resolve(customImage)
+  : path.join(__dirname, 'fixtures', 'portal-mockup.png');
 
-console.log(`[run] generating fixture screenshot (NCU portal login mockup)...`);
-await generateFixture(fixturePath);
+if (customImage) {
+  console.log(`[run] using provided screenshot: ${fixturePath}`);
+} else {
+  console.log(`[run] generating fixture screenshot (NCU portal login mockup)...`);
+  await generateFixture(fixturePath);
+}
 
 const meta = await Jimp.read(fixturePath);
 const image = { path: fixturePath, width: meta.bitmap.width, height: meta.bitmap.height };

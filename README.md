@@ -176,6 +176,40 @@ npm run demo -- --keyword "忘記密碼"   # 端對端：產生測試截圖 -> �
   文字都畫上紅框 + 編號，這就是要送給 GPT-4o fallback 的圖片，可以確認「畫框、編號、產生
   data URL」這段程式碼是正確的（尚未實際打 Azure OpenAI API，因為還沒有金鑰）。
 
+### 4.1 對真實選課系統公告頁的驗證（不是 mockup，是真的線上頁面）
+
+`https://cis.ncu.edu.tw/Course/main/news/announce`（課務組公告）不需要登入就能看到，所以這次
+不用 mockup，改用 `test/screenshotUrl.mjs`（透過本機 Edge headless）直接對正式站截圖，存成
+`test/fixtures/course-announce.png`，跑法：
+
+```bash
+node test/screenshotUrl.mjs "https://cis.ncu.edu.tw/Course/main/news/announce" test/fixtures/course-announce.png
+npm run demo -- --image test/fixtures/course-announce.png --keyword "選課相關資訊"
+```
+
+結果：
+
+- **OCR 正確定位到公告內文裡的關鍵字**：`選課相關資訊`（出現在「115(一)課務日程表及選課
+  相關資訊」這則公告標題裡）被正確框到，信心值 0.93。標註圖：`test/output/result-annotated.png`。
+- **踩到一個真正的 Tesseract 地雷，而且修好了**：對這個真實頁面整張截圖直接跑 OCR，一開始
+  完全失敗（127 個「行」幾乎全是亂碼），但把同一張圖裁小一塊再單獨跑 OCR 卻讀得很準
+  （信心值 0.85–0.93）。反覆測試後找到原因：Tesseract 預設的自動版面分析在處理這種「大範圍
+  單色背景 header + 側邊欄 + 多欄內容」的複雜頁面時會整個失準；解法是**辨識前把圖片放大
+  2 倍、並明確指定 `PSM.AUTO`**，套用後 24 行裡有意義的文字行數從 1 行變成 21 行都讀對。
+  這個修正已經內建進 `src/providers/tesseractOcr.js`（預設 `upscale: 2`），所以後續使用
+  這個 provider 不用再手動處理。
+- **更明確的第二個發現（同一個弱點在兩個完全不同頁面重現，不是巧合）**：即使套用上述修正，
+  導覽列上的「相關資訊／課程查詢／登入系統」三個分頁、標題列「課務組公告」、以及側邊欄
+  「相關網站」標題，**全部沒被 OCR 偵測到**——而它們的共同點是全部畫在**單色背景色塊**上
+  （淺藍色導覽列、灰色標題列）。對照 `test/output/course-som-preview.png`（見下方送出的圖）
+  可以清楚看到：白底黑字/白底藍字的公告內文、麵包屑、頁尾都被正確框出，唯獨這幾塊色底文字
+  完全沒有框。這跟 Portal 頁面「藍底白字的登入按鈕讀不到」是同一類問題，但這次是在真實
+  正式站上、用兩種不同配色（白字配藍底、深色字配淺色底）各重現一次，**足以確定這不是
+  單一頁面的巧合，而是這類 UI（導覽列、標題列、按鈕）的通用弱點**。實務上代表：選課系統的
+  「登入系統」分頁、導覽列這類元件，正式版一定要靠 Azure OpenAI GPT-4o fallback 才能定位，
+  不能只依賴 OCR；而**校方系統慣用的「顏色底 + 文字」導覽/按鈕設計**，也建議之後對 Portal、
+  iNCU 服務櫃台實測時特別留意同樣的模式。
+
 ## 5. 換成正式雲端版本
 
 見 [Azure 服務串接流程](#6-azure-服務串接流程)。申請好資源、填完 `.env` 後執行：
