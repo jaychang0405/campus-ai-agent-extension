@@ -1,20 +1,47 @@
-// OPTIONAL / reference provider — NOT part of the Microsoft stack, kept
-// only so the fallback slot is a drop-in swap if you ever want to A/B
-// accuracy. Anthropic's Claude models (via the "computer use" tool) are
-// specifically trained for on-screen coordinate grounding and tend to beat
-// general-purpose GPT-4o on pixel-grounding benchmarks (e.g. ScreenSpot).
-// Since the competition track is "Microsoft AI 及 Data 生態系應用組", lead
-// with azureOpenAiVision.js for the submission; this file just proves the
-// pipeline's provider interface is not locked to one vendor.
+// Claude vision fallback — same provider interface as azureOpenAiVision.js,
+// callable two ways:
+//
+//   1. Direct Anthropic API (default) — NOT part of the Microsoft stack,
+//      kept mainly as an accuracy reference. Claude models (especially with
+//      the "computer use" tool) are specifically trained for on-screen
+//      coordinate grounding and tend to beat general-purpose GPT-4o on
+//      pixel-grounding benchmarks (e.g. ScreenSpot).
+//   2. Claude models hosted in Microsoft Foundry (pass `foundryEndpoint`) —
+//      Anthropic's Claude family went GA in Microsoft Foundry in July 2026,
+//      so calling it through a Foundry resource DOES count as "Microsoft AI
+//      生態系". The Messages API request/response shape is byte-for-byte
+//      the same as calling Anthropic directly (same `x-api-key` +
+//      `anthropic-version` headers) — only the base URL changes, and the
+//      `model` field becomes your Foundry *deployment name* rather than the
+//      raw model id. See:
+//      https://learn.microsoft.com/azure/foundry/foundry-models/how-to/use-foundry-models-claude
+//
+//   ⚠️ Known gotcha (as of the models' Foundry GA, confirmed in MS Learn's
+//   troubleshooting table): Claude on Foundry requires an Azure Marketplace
+//   subscription with an active pay-as-you-go billing method. Student /
+//   free-trial / startup-credit-only subscriptions are explicitly NOT
+//   supported for deploying it — Azure AI Vision and Azure OpenAI don't have
+//   this restriction, only this Foundry/Marketplace-gated model family does.
+//   Confirm your team's Azure subscription type before planning around this.
 import { toDataUrl } from '../pipeline/imageUtils.js';
 
-export function createClaudeVisionProvider({ apiKey, model = 'claude-sonnet-5' } = {}) {
+export function createClaudeVisionProvider({
+  apiKey,
+  model = 'claude-sonnet-5',
+  foundryEndpoint, // e.g. "https://<resource-name>.services.ai.azure.com/anthropic"
+} = {}) {
   if (!apiKey) {
-    throw new Error('Claude vision provider requires { apiKey } (env: ANTHROPIC_API_KEY)');
+    throw new Error(
+      'Claude vision provider requires { apiKey } ' +
+        '(env: ANTHROPIC_API_KEY, or CLAUDE_FOUNDRY_API_KEY when using foundryEndpoint)'
+    );
   }
+  const url = foundryEndpoint
+    ? `${foundryEndpoint.replace(/\/$/, '')}/v1/messages`
+    : 'https://api.anthropic.com/v1/messages';
 
   return {
-    name: 'claude-vision (reference only, not Microsoft-stack)',
+    name: foundryEndpoint ? 'claude-vision (via Microsoft Foundry)' : 'claude-vision (direct Anthropic API, reference only)',
     async locate({ image, keyword }) {
       const dataUrl = await toDataUrl(image);
       const match = dataUrl.match(/^data:(.+);base64,(.+)$/);
@@ -27,7 +54,7 @@ export function createClaudeVisionProvider({ apiKey, model = 'claude-sonnet-5' }
         `Reply with strict JSON only: {"x":..,"y":..,"width":..,"height":..,"confidence":0-1} ` +
         `or {"x":null} if not found.`;
 
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch(url, {
         method: 'POST',
         headers: {
           'x-api-key': apiKey,
@@ -35,7 +62,7 @@ export function createClaudeVisionProvider({ apiKey, model = 'claude-sonnet-5' }
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          model,
+          model, // direct API: model id (e.g. "claude-sonnet-5") — Foundry: your deployment name
           max_tokens: 300,
           messages: [
             {

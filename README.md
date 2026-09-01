@@ -14,14 +14,37 @@ content script（fetch-based，沒有 Node-only API 依賴，`src/` 底下的程
 |---|---|---|---|---|---|
 | **Azure AI Vision — Image Analysis「Read」OCR**（建議：**主線路**） | 純文字偵測，直接回傳每個字/行的 bounding polygon + 信心值，非用 LLM 猜座標 | 高（像素等級誤差） | ✅ | 低延遲（約 0.3–1s）、便宜 | 畫面上有文字標籤的按鈕/連結/欄位（校務系統絕大多數元件都是這類） |
 | **Azure OpenAI（GPT-4o / GPT-4o-mini）+ Set-of-Mark**（建議：**備援**） | 把 OCR 候選框編號畫在圖上，讓模型「選號碼」而非直接猜 x,y | 中高（靠 SoM 提升，直接猜座標則明顯較差） | ✅ | 較慢（1–3s）、較貴 | 純圖示按鈕、語意查詢（如「送出選課的按鈕」）、OCR 沒抓到文字時 |
+| **Claude（Sonnet 5 / Opus 5 等）via Microsoft Foundry** | 專門訓練過的螢幕座標/computer-use 定位能力，直接猜座標通常比 GPT-4o 準 | 中高，且直接猜座標比 GPT-4o 穩定 | ✅（2026/07 GA，透過 Foundry 資源呼叫算 Microsoft 生態系；直接打 Anthropic API 則不算，見下方說明） | 中；但**需要有真實付款方式的 Azure 訂閱**，學生/免費試用訂閱不支援部署 | 想要比 GPT-4o 更準的直接座標定位、且隊上能拿到符合資格的 Azure 訂閱時 |
 | **OmniParser**（Microsoft Research，開源，Azure AI Foundry model catalog 可用） | 專門訓練來解析 GUI 截圖，直接輸出「所有可互動元件」的 bbox + 語意描述 | 高，且對圖示按鈕也有效 | ✅（微軟自家研究） | 需要自架/GPU 或走 Azure AI Foundry endpoint，複雜度較高 | 進階/加分項：若時間允許，可在展示時特別強調「用了微軟自己的 GUI-agent 研究成果」 |
 | **Florence-2**（Microsoft，開源小模型） | 單一模型同時做 OCR + grounding + region captioning | 中高 | ✅ | 比 GPT-4o 便宜快速 | 可用來取代「Azure Vision OCR + GPT-4o SoM」兩段式流程，之後優化延遲時可考慮 |
-| Claude vision（Anthropic，含 computer-use 座標定位） | 專門訓練過的螢幕座標定位能力，一般公認優於一般 GPT-4o 直接猜座標 | 中高 | ❌（非微軟生態系） | 中 | 僅列為技術參考／備用，`src/providers/claudeVision.js` 已實作介面相同的版本，方便日後 A/B 測試，但**不建議**用在參賽的正式提交版本 |
 
 **核心判斷**：關鍵字定位本質上大多是「畫面上有沒有這段文字、它在哪」的**文字偵測**問題，
 不是開放式的視覺推理問題。OCR 是為這個任務量身打造的工具，比讓 LLM 用視覺猜像素座標更準、
 更快、更便宜、也更少 hallucination 風險。LLM vision 只在 OCR 覆蓋不到的情況（圖示按鈕、
 語意查詢、需要消歧義）才介入 —— 這也是本 repo 採用的**混合式架構**（見下方）。
+
+> **關於 Claude 算不算「Microsoft 生態系」**：主辦單位在主題一「Agentic Frontier」明確列出
+> Microsoft Foundry 可選 GPT / Claude / Llama / Mistral 等模型，而 Anthropic 的 Claude
+> 系列已於 2026 年 7 月在 Microsoft Foundry **正式 GA**（[Microsoft Azure Blog 公告](https://azure.microsoft.com/en-us/blog/introducing-anthropics-claude-models-in-microsoft-foundry-bringing-frontier-intelligence-to-azure/)、
+> [Microsoft Learn 文件](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/claude-models)）。
+> 關鍵是**怎麼呼叫**：
+> - 走 **Microsoft Foundry 的資源端點**（`https://<resource-name>.services.ai.azure.com/anthropic/v1/messages`）
+>   → 算 Microsoft 生態系，因為走的是 Azure 資源、Azure Marketplace 訂閱、Azure RBAC 權限管理。
+> - 直接打 `api.anthropic.com`（Anthropic 官方 API）→ 不算，跟 Azure 完全無關。
+>
+> 兩者的請求格式幾乎一模一樣（同樣是 `x-api-key` + `anthropic-version` header、一樣的
+> Messages API JSON），差別只在 base URL，以及 `model` 欄位在 Foundry 情境下要填**你部署時取的
+> deployment name**（不一定等於模型代號）。`src/providers/claudeVision.js` 已經同時支援兩種模式
+> （傳入 `foundryEndpoint` 參數即可切到 Foundry 模式）。
+>
+> **但有一個重要限制**：Claude 在 Foundry 上是透過 **Azure Marketplace** 訂閱購買，需要**有效的
+> 隨付即用（pay-as-you-go）付款方式**——Microsoft Learn 的文件明確排除了「student、free trial、
+> startup credit-based」這類訂閱（也就是我們前面建議申請的 **Azure for Students** 剛好就在被排除
+> 名單裡）。這個限制**只有 Claude-on-Foundry 這個模型系列**才有，Azure AI Vision 跟 Azure OpenAI
+> 不受影響。所以：如果隊上只有學生訂閱，Claude 這條路線在部署前就會卡關，正式提交版本建議還是
+> 以 Azure OpenAI GPT-4o 當 fallback；如果能透過學校、指導老師或比賽主辦方拿到有正式付款方式的
+> Azure 訂閱，Claude-on-Foundry 才會是可行選項，屆時可以直接把 `visionFallback` 換成
+> `createClaudeVisionProvider({ apiKey, foundryEndpoint, model })`。
 
 ## 2. Pipeline 架構
 
@@ -58,7 +81,7 @@ src/
     azureVisionOcr.js        # 主線路（正式提交版本用這個）
     azureOpenAiVision.js     # 備援（正式提交版本用這個）
     tesseractOcr.js           # 本機 OCR，不用任何 API key，這次 PoC 驗證用
-    claudeVision.js           # 選用／參考，非微軟生態系
+    claudeVision.js           # Claude fallback；傳 foundryEndpoint 走 Microsoft Foundry(算生態系)，不傳則走 Anthropic 直連(僅供參考)
   matching/
     textMatch.js        # 關鍵字 <-> OCR 文字 的比對邏輯（精確/子字串/模糊/跨字合併）
     setOfMark.js         # 畫編號框，給 LLM fallback 用
