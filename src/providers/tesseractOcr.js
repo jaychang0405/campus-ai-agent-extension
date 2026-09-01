@@ -7,12 +7,19 @@
 // board, with its header banner, sidebar, and multi-column body all in one
 // image) trip up Tesseract's default automatic page-segmentation: tested
 // against test/fixtures/course-announce.png it returned near-total garbage
-// at 1x scale, but upscaling 2x before recognition (plus forcing PSM=AUTO
-// explicitly rather than relying on the library default) fixed it —
-// 1 garbage line became 21 correctly-read lines. This is a Tesseract
-// quirk, not a fundamental limit of the approach: Azure AI Vision's Read
-// API has much more robust layout analysis out of the box and shouldn't
-// need this workaround, but it's cheap insurance to keep here too.
+// at defaults. Two changes fixed it: (1) upscale 2x before recognition,
+// and (2) use PSM.SPARSE_TEXT instead of the library's default AUTO —
+// AUTO tries to carve the page into a few big regions first and silently
+// drops whole sections (nav bars, sidebars) that don't fit its model;
+// SPARSE_TEXT makes no structural assumption and just hunts for text
+// anywhere, which recovered most of what AUTO missed. One thing NEITHER
+// setting recovers: tab-style nav bars (see README § 4.1) — that's a
+// genuine detection blind spot, not a tuning problem, and is exactly the
+// class of target the Azure OpenAI vision fallback exists for. This is a
+// Tesseract-specific quirk, not a fundamental limit of the approach:
+// Azure AI Vision's Read API has much more robust layout analysis out of
+// the box and shouldn't need this workaround, but it's cheap insurance to
+// keep here too.
 import { createWorker, PSM } from 'tesseract.js';
 import { Jimp, JimpMime } from 'jimp';
 import { toBuffer } from '../pipeline/imageUtils.js';
@@ -30,7 +37,7 @@ export function createTesseractOcrProvider(opts = {}) {
         opts.verbose ? { logger: (m) => console.log('[tesseract]', m.status, m.progress) } : undefined
       );
       try {
-        await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO });
+        await worker.setParameters({ tessedit_pageseg_mode: opts.pageSegMode ?? PSM.SPARSE_TEXT });
 
         const source = await prepareSource(image, upscale);
         const { data } = await worker.recognize(source);
