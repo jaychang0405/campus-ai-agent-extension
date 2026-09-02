@@ -249,6 +249,46 @@ npm run test:nav-fallback
 準確度。但這是錦上添花的優化，不是必要條件——沒有它，pipeline 現在就已經能正確定位
 分頁式導覽列了，只是準確度取決於 GPT-4o 的能力而不是預先給的候選框。
 
+### 4.3 怎麼在本機完整測試「所有關鍵字抓不抓得到」
+
+一個一個手動跑 `npm run demo -- --keyword "X"` 太慢，用 `test/checkKeywords.mjs` 一次跑完
+一整份關鍵字清單：
+
+```bash
+npm run test:keywords            # 跑 test/keywords/ 底下每一份清單，對應同名的 test/fixtures/*.png
+# 或針對單一頁面：
+node test/checkKeywords.mjs --image test/fixtures/course-announce.png --keywords test/keywords/course-announce.json
+```
+
+關鍵字清單是純文字 JSON 陣列，放在 `test/keywords/<跟 fixture 同檔名>.json`（例如
+`test/keywords/course-announce.json` 對應 `test/fixtures/course-announce.png`）。
+**要測其他系統或其他頁面**：先用 `node test/screenshotUrl.mjs <url> test/fixtures/<name>.png`
+截圖（免登入頁面才能這樣直接抓），或用 `test/generateFixture.mjs` 的寫法照著刻一個 mockup
+（需要登入的頁面），再照畫面上實際的文字寫一份同檔名的 `test/keywords/<name>.json`，接著
+`npm run test:keywords` 就會自動抓到並一起跑。
+
+輸出對每個關鍵字給兩欄結果，這就是實際回答你這兩個問題的地方：
+
+1. **「所有關鍵字是否抓到」** —— 看 `OCR` 那欄。目前兩份清單（Portal mockup + 選課系統
+   公告頁）合計 26 個關鍵字，**21 個 OCR 直接找到，0 個完全找不到**：
+
+   ```
+   === TOTAL: 26 keywords across 2 pages — 21 via OCR, 5 via fallback, 0 unresolved ===
+   ```
+
+2. **「OCR 辨識不到的要怎麼辦」** —— 看 `with fallback` 那欄。這 5 個 OCR 抓不到的
+   （課程查詢、登入系統、新選課登記系統、陽明交通大學、登入 Portal），全部在加上 vision
+   fallback 後都能解出結果（`source: llm-vision`）。**這就是本機能驗證到的極限**：能確認
+   「轉接邏輯正確」（OCR 找不到 → 一定會轉給 LLM），但**驗證不了「LLM 猜的座標準不準」**，
+   因為本機沒有真的 Azure OpenAI 金鑰，`with fallback` 欄目前用的是寫死假座標的 stub。
+   要驗證真實準確度，把 `.env` 填好、跑 `npm run test:keywords` 就會自動偵測到
+   `AZURE_OPENAI_*` 環境變數並自動改用真的 `azureOpenAiVision.js`（`test/checkKeywords.mjs`
+   裡的 `makeVisionFallback()` 已經處理好這個切換，不用改程式碼），畫面上會顯示
+   `fallback: REAL Azure OpenAI` 而不是 `stub placeholder`。
+   - 如果加了 fallback 後還是有某一行印出 `NOT FOUND ⚠️`，那不是「這個元件比較難找」的
+     正常現象，是 `locateKeyword.js` 的轉接邏輯本身出了 bug，要直接去查那支檔案，不是去
+     調 OCR 參數。
+
 ## 5. 換成正式雲端版本
 
 見 [Azure 服務串接流程](#6-azure-服務串接流程)。申請好資源、填完 `.env` 後執行：
