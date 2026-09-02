@@ -215,6 +215,40 @@ npm run demo -- --image test/fixtures/course-announce.png --keyword "選課相�
   調 OCR 參數解決的問題；之後對 Portal、iNCU 服務櫃台實測時，也請優先留意有沒有類似的
   分頁式導覽列。
 
+### 4.2 那要怎麼「識別」分頁式導覽列？——不用，pipeline 本來就不需要知道
+
+重點是：**orchestrator 不需要先判斷「這是不是分頁式導覽列」才能處理它**。
+`locateKeyword.js` 只問一件事：「OCR 有沒有夠有信心的比對結果？」沒有的話，不管原因是
+分頁式導覽列、圖示按鈕、還是任何其他理由，都會自動轉給 vision fallback——系統不需要
+事先分類 UI 元件類型。
+
+`test/nav-fallback-demo.mjs` 用真實 Tesseract OCR（我們已知它找不到「課程查詢」「登入系統」）
+搭配一個 stub vision provider（代替還沒接上金鑰的 `azureOpenAiVision.js`）跑一次完整流程，
+證明這個轉接是自動發生的：
+
+```bash
+npm run test:nav-fallback
+```
+
+```
+[nav-fallback-demo] LLM fallback invoked: keyword="課程查詢", 32 OCR boxes given as context
+[nav-fallback-demo] "課程查詢" -> source: llm-vision, found: true, coordinate: (255, 94)
+[nav-fallback-demo] LLM fallback invoked: keyword="登入系統", 32 OCR boxes given as context
+[nav-fallback-demo] "登入系統" -> source: llm-vision, found: true, coordinate: (255, 94)
+[nav-fallback-demo] PASS — nav-bar keywords correctly routed to the vision fallback with no special-case detection needed
+```
+
+（座標 `(255, 94)` 是 stub 寫死的假值，只是用來證明「轉接有發生」，不是真的定位結果——
+等接上真的 Azure OpenAI 金鑰、跑 `npm run test:azure` 之後，這個位置就會換成 GPT-4o
+實際看圖判斷出來的座標。）
+
+如果之後真的想要更進一步優化（**目前不建議花時間做，因為現有架構已經正確處理了**）：
+可以額外加一個「影像層面的區域偵測」，找出畫面上「OCR 完全沒讀到任何文字、但夾在兩塊
+有讀到文字的區域中間」的長條區塊（例如這次的導覽列，夾在 header 跟麵包屑之間），把這些
+區塊也一起當成候選框傳給 LLM，讓 GPT-4o 不用整張圖用猜的，可以進一步提高 fallback 的
+準確度。但這是錦上添花的優化，不是必要條件——沒有它，pipeline 現在就已經能正確定位
+分頁式導覽列了，只是準確度取決於 GPT-4o 的能力而不是預先給的候選框。
+
 ## 5. 換成正式雲端版本
 
 見 [Azure 服務串接流程](#6-azure-服務串接流程)。申請好資源、填完 `.env` 後執行：

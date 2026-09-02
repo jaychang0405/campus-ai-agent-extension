@@ -7,6 +7,7 @@
   "scripts": {
     "demo": "node test/run.mjs",
     "test:fallback": "node test/unit-fallback.mjs",
+    "test:nav-fallback": "node test/nav-fallback-demo.mjs",
     "test:azure": "node --env-file-if-exists=.env test/azure-connection-test.mjs"
   },
   "dependencies": {
